@@ -1,0 +1,94 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ elasticsearch_ss_name }}
+  namespace: {{ logging_namespace }}
+  labels:
+    app: {{ elasticsearch_label }}
+spec:
+  serviceName: elasticsearch
+  replicas: 1
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app: {{ elasticsearch_label }}
+  template:
+    metadata:
+      labels:
+        app: {{ elasticsearch_label }}
+    spec:
+      initContainers:
+      - name: increase-vm-max-map
+        image: busybox
+        imagePullPolicy: IfNotPresent
+        command: ["sysctl", "-w", "vm.max_map_count=262144"]
+        securityContext:
+          privileged: true
+      - name: increase-fd-ulimit
+        image: busybox
+        imagePullPolicy: IfNotPresent
+        command: ["sh", "-c", "ulimit -n 65536"]
+        securityContext:
+          privileged: true
+      - name: volume-permissions
+        image: busybox
+        imagePullPolicy: IfNotPresent
+        command: ["sh", "-c", "chown -R 1000:1000 /usr/share/elasticsearch/data"]
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: elasticsearch-data
+          mountPath: /usr/share/elasticsearch/data
+      containers:
+      - name: elasticsearch
+        image: {{ elasticsearch_image }}
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: es-http
+          protocol: TCP
+          containerPort: 9200
+        - name: es-transport
+          protocol: TCP
+          containerPort: 9300
+        env:
+        - name: ES_JAVA_OPTS
+          valueFrom:
+              configMapKeyRef:
+                  name: {{ elasticsearch_configmap_name }}
+                  key: ES_JAVA_OPTS
+        resources:
+          requests:
+            cpu: {{ elasticsearch_cpu_requests }}
+            memory: {{ elasticsearch_memory_requests }}
+          limits:
+            cpu: {{ elasticsearch_cpu_limits }}
+            memory: {{ elasticsearch_memory_limits }}
+        readinessProbe:
+          httpGet:
+            scheme: HTTP
+            path: /_cluster/health
+            port: es-http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        livenessProbe:
+          tcpSocket:
+            port: es-http
+          initialDelaySeconds: 60
+          periodSeconds: 10
+        volumeMounts:
+        - name: elasticsearch-data
+          mountPath: /usr/share/elasticsearch/data
+        - name: elasticsearch-config
+          mountPath: /usr/share/elasticsearch/config/elasticsearch.yml
+          subPath: elasticsearch.yml
+      volumes:
+        - name: elasticsearch-config
+          configMap:
+            name: {{ elasticsearch_configmap_name }}
+            items:
+              - key: elasticsearch.yml
+                path: elasticsearch.yml
+        - name: elasticsearch-data
+          persistentVolumeClaim:
+            claimName: {{ elasticsearch_pvc_name }}

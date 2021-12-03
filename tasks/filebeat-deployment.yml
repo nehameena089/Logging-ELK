@@ -1,0 +1,108 @@
+---
+# tasks file for filebeat deployment
+
+- name: Filebeat deployment | Templates list
+  set_fact:
+    filebeat_deployment_templates:
+      - { name: filebeat-sa ,file: filebeat-serviceaccount.yaml , type: serviceaccount }
+      - { name: filebeat-cr ,file: filebeat-clusterrole.yaml ,type: clusterrole }
+      - { name: filebeat-crb ,file: filebeat-clusterrolebinding.yaml ,type: clusterrolebinding }
+      - { name: filebeat ,file: filebeat-daemonset.yaml ,type: daemonset }
+  when:
+    - inventory_hostname == groups['kube-master'][0]
+  tags:
+    - filebeat-deployment
+
+
+- name: Filebeat deployment | Create manifests
+  template:
+    src: "filebeat/{{ item.file }}.j2"
+    dest: "{{ logging_dir }}/{{ item.file }}"
+  with_items: "{{ filebeat_deployment_templates }}"
+  register: filebeat_deployment_manifests
+  when:
+    - inventory_hostname == groups['kube-master'][0]
+  tags:
+    - filebeat-deployment
+
+
+- name: Filebeat deployment | Delete previous filebeat configmap
+  shell: '{{ bin_dir }}/kubectl delete configmap {{ filebeat_configmap_name }} -n {{ logging_namespace }}'
+  ignore_errors: True
+  when:
+    - inventory_hostname == groups['kube-master'][0]
+    - operation == "install" or operation == "upgrade"
+  tags:
+    - filebeat-deployment-install
+
+
+- name: Filebeat deployment | Debug master node ip
+  debug:
+    msg: "masternode_ip = {{ masternode_ip }}"
+  when:
+    - inventory_hostname == groups['kube-master'][0]
+    - operation == "install" or operation == "upgrade"
+  tags:
+    - filebeat-deployment-install
+
+
+- name: ELK setup | Copy files for filebeat configmap
+  copy:
+    src: "{{ item }}"
+    dest: "{{ logging_dir }}/{{ item }}"
+  with_items:
+    - files/filebeat.yml
+  when:
+    - inventory_hostname == groups['kube-master'][0]
+    - operation == "install" or operation == "upgrade"
+  tags:
+    - filebeat-deployment-install
+
+
+- name: Filebeat deployment | Create configmap for filebeat 
+  shell: '{{ bin_dir }}/kubectl create configmap {{ filebeat_configmap_name }} --from-literal=LOGSTASH_HOST={{ masternode_ip }} --from-literal=LOGSTASH_PORT={{ logstash_svc_nodeport}} --from-file={{ logging_dir }}/files/filebeat.yml -n {{ logging_namespace }}'
+  when:
+    - inventory_hostname == groups['kube-master'][0]
+    - operation == "install" or operation == "upgrade"
+  tags:
+    - filebeat-deployment-install
+
+
+- name: Filebeat deployment | Apply manifests
+  kube:
+    name: "{{ item.item.name }}"
+    kubectl: "{{ bin_dir }}/kubectl"
+    resource: "{{ item.item.type }}"
+    filename: "{{ logging_dir }}/{{ item.item.file }}"
+    state: "latest"
+  with_items: "{{ filebeat_deployment_manifests.results }}"
+  when:
+    - inventory_hostname == groups['kube-master'][0]
+    - operation == "install" or operation == "upgrade"
+  tags:
+    - filebeat-deployment-install
+
+
+- name: Filebeat deployment | Delete manifests
+  kube:
+    name: "{{ item.item.name }}"
+    kubectl: "{{ bin_dir }}/kubectl"
+    resource: "{{ item.item.type }}"
+    filename: "{{ logging_dir }}/{{ item.item.file }}"
+    state: absent
+  with_items: "{{ filebeat_deployment_manifests.results }}"
+  when:
+    - inventory_hostname == groups['kube-master'][0]
+    - operation == "uninstall"
+  tags:
+    - filebeat-deployment-uninstall
+
+
+- name: Filebeat deployment | Delete filebeat configmap
+  shell: '{{ bin_dir }}/kubectl delete configmap {{ filebeat_configmap_name }} -n {{ logging_namespace }}'
+  ignore_errors: True
+  when:
+    - inventory_hostname == groups['kube-master'][0]
+    - operation == "uninstall"
+  tags:
+    - filebeat-deployment-uninstall

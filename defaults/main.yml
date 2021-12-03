@@ -1,0 +1,74 @@
+---
+# defaults file for logging-elk
+
+ansible_user: devops
+logging_namespace: logging
+
+operation_loggingsetup: install # setting this to uninsatll will delete the index templates, ILMs, PV, PVC, SC, namespace. It will result in losing all data
+operation: install # setting this to uninstall will delete elk deployments etc
+
+logcollector: rsyslog
+
+# variables for logging setup
+logging_dir: /home/devops/logging
+logging_storageclass_name: logging
+elasticsearch_pvc_name: elasticsearch-data
+elasticsearch_pvc_size: 100Gi
+
+
+
+# variables for ELK files
+elasticsearch_label: elasticsearch-label
+elasticsearch_configmap_name: elasticsearch-config
+elasticsearch_ss_name: elasticsearch
+elasticsearch_image: docker.elastic.co/elasticsearch/elasticsearch:7.10.0
+elasticsearch_cpu_requests: "4" 
+elasticsearch_cpu_limits: "4"
+elasticsearch_memory_requests: 10Gi
+elasticsearch_memory_limits: 10Gi
+elasticsearch_jvm_options: -Xms8g -Xmx8g 
+
+kibana_label: kibana
+kibana_configmap_name: kibana-config
+kibana_deployment_name: kibana
+kibana_svc_name: kibana
+kibana_svc_nodeport: 30005
+kibana_image: docker.elastic.co/kibana/kibana:7.10.0
+kibana_cpu_requests: "2"
+kibana_cpu_limits: "2"
+kibana_memory_requests: 4Gi
+kibana_memory_limits: 4Gi
+
+logstash_label: logstash
+logstash_configmap_name: logstash-config
+logstash_deployment_name: logstash
+logstash_svc_name: logstash
+logstash_svc_nodeport: 30004
+logstash_image: docker.elastic.co/logstash/logstash:7.10.0
+logstash_cpu_requests: "4"
+logstash_cpu_limits: "4"
+logstash_memory_requests: 6Gi
+logstash_memory_limits: 6Gi
+logstash_jvm_options: -Xmx4g -Xms4g
+
+
+# variables for filebeat files
+filebeat_label: filebeat
+filebeat_serviceaccount_name: filebeat
+filebeat_clusterrole_name: filebeat
+filebeat_clusterrolebinding_name: filebeat
+filebeat_configmap_name: filebeat-config
+filebeat_daemonset_name: filebeat
+
+filebeat_image: docker.elastic.co/beats/filebeat:7.10.1
+filebeat_cpu_requests: "1" 
+filebeat_cpu_limits: "1"
+filebeat_memory_requests: 2Gi
+filebeat_memory_limits: 2Gi
+filebeat_docker_logfiles: /var/lib/docker/containers
+masternode_ip: "{{ hostvars[groups['kube-master'][0]].ansible_host }}"
+
+# variables for rsyslog files
+central_rsyslog_server_ip: "{{ hostvars[groups['kube-node'][0]].ansible_host }}"
+central_rsyslog_server_port: 514
+rsyslog_docker_logfiles: /var/lib/docker/containers/*/*-json.log

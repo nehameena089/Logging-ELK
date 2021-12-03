@@ -1,0 +1,7 @@
+- name: Ensure kubectl command works for the user
+  shell: "dirname `which kubectl`"
+  register: kubectl_bin_path
+  tags:
+    - preinstall
+    
+- set_fact: bin_dir="{{ kubectl_bin_path.stdout }}"

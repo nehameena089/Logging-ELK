@@ -1,0 +1,12 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ filebeat_clusterrolebinding_name }}
+subjects:
+- kind: ServiceAccount
+  name: {{ filebeat_serviceaccount_name }}
+  namespace: {{ logging_namespace }}
+roleRef:
+  kind: ClusterRole
+  name: {{ filebeat_clusterrole_name }}
+  apiGroup: rbac.authorization.k8s.io

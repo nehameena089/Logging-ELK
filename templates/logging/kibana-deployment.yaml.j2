@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ kibana_deployment_name }}
+  namespace: {{ logging_namespace }}
+  labels:
+    app: {{ kibana_label }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ kibana_label }}
+  template:
+    metadata:
+      labels:
+        app: {{ kibana_label }}
+    spec:
+      containers:
+      - name: kibana
+        image: {{ kibana_image }}
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: kibana-http
+          protocol: TCP
+          containerPort: 5601
+        resources:
+          requests:
+            cpu: {{ kibana_cpu_requests }}
+            memory: {{ kibana_memory_requests }}
+          limits:
+            cpu: {{ kibana_cpu_limits }}
+            memory: {{ kibana_memory_limits }}
+        readinessProbe:
+          httpGet:
+            path: /api/status
+            port: kibana-http
+          initialDelaySeconds: 20
+          periodSeconds: 10
+        livenessProbe:
+          tcpSocket:
+            port: 5601
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        volumeMounts:
+        - name: kibana-config
+          mountPath: /usr/share/kibana/config/kibana.yml
+          subPath: kibana.yml
+      volumes:
+      - name: kibana-config
+        configMap:
+          name: {{ kibana_configmap_name }}
+          items:
+            - key: kibana.yml
+              path: kibana.yml

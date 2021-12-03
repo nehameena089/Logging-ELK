@@ -1,0 +1,290 @@
+---
+# tasks file for logging-setup
+
+- name: Logging setup | Delete logging directory
+  file:
+    path: "{{ logging_dir }}"
+    state: absent
+  when:
+    - inventory_hostname == groups['kube-master'][0]
+  tags:
+    - logging-setup
+
+
+- name: Logging setup | Create logging directory
+  file:
+    path: "{{ logging_dir }}"
+    state: directory
+    owner: "{{ ansible_user }}"
+    mode: 0755
+  become: yes
+  when:
+    - inventory_hostname == groups['kube-master'][0]
+  tags:
+    - logging-setup
+
+
+- name: Logging setup | Templates list
+  set_fact:
+    logging_setup_templates:
+      - { name: logging-ns ,file: logging-namespace.yaml ,type: namespace}
+      - { name: logging-sc ,file: logging-storageclass.yaml ,type: strorageclass}
+      - { name: elasticsearch-pvc ,file: elasticsearch-pvc.yaml ,type: persistentvolumeclaim}
+  when:
+    - inventory_hostname == groups['kube-master'][0]
+  tags:
+    - logging-setup
+
+
+- name: Logging setup | Create manifests
+  template:
+    src: "logging/{{ item.file }}.j2"
+    dest: "{{ logging_dir}}/{{ item.file }}"
+  with_items: "{{ logging_setup_templates }}"
+  register: logging_setup_manifests
+  when:
+    - inventory_hostname == groups['kube-master'][0]
+  tags:
+    - logging-setup
+
+- name: Logging setup | Apply manifests
+  kube:
+    name: "{{ item.item.name }}"
+    kubectl: "{{ bin_dir }}/kubectl"
+    resource: "{{ item.item.type }}"
+    filename: "{{ logging_dir }}/{{ item.item.file }}"
+    state: "latest"
+  with_items: "{{ logging_setup_manifests.results }}"
+  when:
+    - inventory_hostname == groups['kube-master'][0]
+    - operation_loggingsetup == "install" or operation_loggingsetup == "upgrade"
+    - operation == "install" or operation == "upgrade"
+  tags:
+    - logging-setup-install
+
+
+- name: ELK setup | Templates list
+  set_fact:
+    elk_setup_templates:
+      - { name: elasticsearch-config ,file: elasticsearch-configmap.yaml ,type: configmap}
+      - { name: elasticsearch ,file: elasticsearch-statefulset.yaml ,type: statefulset}
+      - { name: elasticsearch-service ,file: elasticsearch-service.yaml ,type: service}
+      - { name: kibana-config ,file: kibana-configmap.yaml ,type: configmap}
+      - { name: kibana ,file: kibana-deployment.yaml ,type: deployment}
+      - { name: kibana-service ,file: kibana-service.yaml ,type: service}
+      - { name: logstash ,file: logstash-deployment.yaml ,type: deployments}
+      - { name: logstash-service ,file: logstash-service.yaml ,type: service}
+  when:
+    - inventory_hostname == groups['kube-master'][0]
+  tags:
+    - elk-setup
+
+
+- name: ELK setup | Create manifests
+  template:
+    src: "logging/{{ item.file }}.j2"
+    dest: "{{ logging_dir }}/{{ item.file }}"
+  with_items: "{{ elk_setup_templates }}"
+  register: elk_setup_manifests
+  when:
+    - inventory_hostname == groups['kube-master'][0]
+  tags:
+    - elk-setup
+
+
+- name: Logging setup | Create files directory
+  file:
+    path: "{{ logging_dir }}/files"
+    state: directory
+    owner: "{{ ansible_user }}"
+    mode: 0755
+  become: yes
+  when:
+    - inventory_hostname == groups['kube-master'][0]
+    - operation == "install" or operation == "upgrade"
+  tags:
+    - logging-setup-install
+
+
+- name: ELK setup | Delete previous logstash configmap
+  shell: '{{ bin_dir }}/kubectl delete configmap {{ logstash_configmap_name }} -n {{ logging_namespace }}'
+  ignore_errors: True
+  when:
+    - inventory_hostname == groups['kube-master'][0]
+    - operation == "install"
+  tags:
+    - elk-setup-install
+
+
+- name: ELK setup | Copy files for logstash configmap
+  copy:
+    src: "{{ item }}"
+    dest: "{{ logging_dir }}/{{ item }}"
+  with_items: 
+    - files/logstash.yml
+    - files/logstash.conf
+    - files/patterns
+    - files/logstash-filebeat.conf
+  when:
+    - inventory_hostname == groups['kube-master'][0]
+    - operation == "install" or operation == "upgrade"
+  tags:
+    - elk-setup-install
+
+
+- name: ELK setup | Create configmap for logstash (rsyslog)
+  shell: '{{ bin_dir }}/kubectl create cm {{ logstash_configmap_name }} --from-file={{ logging_dir }}/files/logstash.conf --from-file={{ logging_dir }}/files/logstash.yml --from-file={{ logging_dir }}/files/patterns --from-literal=LS_JAVA_OPTS="{{ logstash_jvm_options }}" -n {{ logging_namespace }}'
+  when:
+    - inventory_hostname == groups['kube-master'][0]
+    - logcollector == "rsyslog"
+    - operation == "install" or operation == "upgrade"
+  tags:
+    - elk-setup-install
+
+
+- name: ELK setup | Create configmap for logstash (filebeat)
+  shell: '{{ bin_dir }}/kubectl create cm {{ logstash_configmap_name }} --from-file=logstash.conf={{ logging_dir }}/files/logstash-filebeat.conf --from-file={{ logging_dir }}/files/logstash.yml --from-file={{ logging_dir }}/files/patterns --from-literal=LS_JAVA_OPTS="{{ logstash_jvm_options }}" -n {{ logging_namespace }}'
+  when:
+    - inventory_hostname == groups['kube-master'][0]
+    - logcollector == "filebeat"
+    - operation == "install" or operation == "upgrade"
+  tags:
+    - elk-setup-install
+
+
+- name: ELK setup | Apply manifests
+  kube:
+    name: "{{ item.item.name }}"
+    kubectl: "{{ bin_dir }}/kubectl"
+    resource: "{{ item.item.type }}"
+    filename: "{{ logging_dir }}/{{ item.item.file }}"
+    state: "latest"
+  with_items: "{{ elk_setup_manifests.results }}"
+  when:
+    - inventory_hostname == groups['kube-master'][0]
+    - operation == "install" or operation == "upgrade"
+  tags:
+    - elk-setup-install
+
+
+- name: ELK setup | Wait for elasticsearch pod to come up
+  shell: '{{ bin_dir }}/kubectl wait -n {{ logging_namespace }} --for=condition=Ready pods --selector app={{ elasticsearch_label }} --timeout=150s'
+  register: kubectl_pods_ready
+  when:
+    - inventory_hostname == groups['kube-master'][0]
+    - operation_loggingsetup == "install" or operation_loggingsetup == "upgrade"
+    - operation == "install" or operation == "upgrade"
+  tags:
+    - logging-setup-install
+
+- name: ELK setup | Debug elasticsearch pod status 
+  debug: 
+    msg: "{{ kubectl_pods_ready }}"
+  when:
+    - inventory_hostname == groups['kube-master'][0]
+    - operation_loggingsetup == "install" or operation_loggingsetup == "upgrade"
+    - operation == "install" or operation == "upgrade"
+  tags:
+    - logging-setup-install
+
+- name: ELK setup | Fetch elasticsearch pod ip 
+  shell: '{{ bin_dir }}/kubectl get ep elasticsearch -n {{ logging_namespace }} -o jsonpath="{.subsets[0].addresses[0].ip}"'
+  register: kubectl_elasticsearch_podip
+  when:
+    - inventory_hostname == groups['kube-master'][0]
+    - operation_loggingsetup == "install" or operation_loggingsetup == "upgrade"
+    - operation == "install" or operation == "upgrade"
+  tags:
+    - logging-setup-install
+
+- name: ELK setup | Debug elasticsearch pod ip
+  debug: 
+    msg: "{{ kubectl_elasticsearch_podip }}"
+  when:
+    - inventory_hostname == groups['kube-master'][0]
+    - operation_loggingsetup == "install" or operation_loggingsetup == "upgrade"
+    - operation == "install" or operation == "upgrade"
+  tags:
+    - logging-setup-install
+
+
+- name: ELK setup | Set elasticsearch pod ip
+  set_fact: elasticsearch_podip="{{ kubectl_elasticsearch_podip.stdout }}"
+  when:
+    - inventory_hostname == groups['kube-master'][0]
+    - operation_loggingsetup == "install" or operation_loggingsetup == "upgrade"
+    - operation == "install" or operation == "upgrade"
+  tags:
+    - logging-setup-install
+
+
+- name: ELK setup | Create index lifecycle policy for elasticsearch
+  uri:
+    url: http://{{ elasticsearch_podip }}:9200/_ilm/policy/logstash-cleanup-policy?pretty
+    method: PUT
+    return_content: yes
+    body: '{"policy": { "phases": { "hot": { "actions": {} }, "delete": { "min_age": "7d", "actions": { "delete": {} } } } } }'
+    body_format: json
+    headers:
+      Content-Type: "application/json"
+  when:
+    - inventory_hostname == groups['kube-master'][0]
+    - operation_loggingsetup == "install" or operation_loggingsetup == "upgrade"
+    - operation == "install" or operation == "upgrade"
+  tags:
+    - logging-setup-install
+
+
+- name: ELK setup | Create index template for elasticsearch
+  uri:
+    url: http://{{ elasticsearch_podip }}:9200/_template/logstash?pretty
+    method: PUT
+    return_content: yes
+    body: '{ "index_patterns" : ["logstash-*"], "settings": { "number_of_replicas": "0", "index.lifecycle.name": "logstash-cleanup-policy" }, "mappings": { "properties": { "ces_timestamp": { "type": "text" } } }, "aliases": {} }'
+    body_format: json
+    headers:
+      Content-Type: "application/json"
+  when:
+    - inventory_hostname == groups['kube-master'][0]
+    - operation_loggingsetup == "install" or operation_loggingsetup == "upgrade"
+    - operation == "install" or operation == "upgrade"
+  tags:
+    - logging-setup-install
+
+
+- name: ELK deployments manifests | Delete manifests
+  kube:
+    name: "{{ item.item.name }}"
+    kubectl: "{{ bin_dir }}/kubectl"
+    resource: "{{ item.item.type }}"
+    filename: "{{ logging_dir }}/{{ item.item.file }}"
+    state: absent
+  with_items: "{{ elk_setup_manifests.results }}"
+  when:
+    - inventory_hostname == groups['kube-master'][0]
+    - operation == "uninstall"
+  tags:
+    - elk-setup-uninstall
+
+- name: ELK setup | Delete logstash configmap
+  shell: '{{ bin_dir }}/kubectl delete configmap {{ logstash_configmap_name }} -n {{ logging_namespace }}'
+  ignore_errors: True
+  when:
+    - inventory_hostname == groups['kube-master'][0]
+    - operation == "uninstall"
+  tags:
+    - elk-setup-uninstall
+
+- name: Logging setup | Delete manifests
+  kube:
+    name: "{{ item.item.name }}"
+    kubectl: "{{ bin_dir }}/kubectl"
+    resource: "{{ item.item.type }}"
+    filename: "{{ logging_dir }}/{{ item.item.file }}"
+    state: absent
+  with_items: "{{ logging_setup_manifests.results }}"
+  when:
+    - inventory_hostname == groups['kube-master'][0]
+    - operation_loggingsetup == "uninstall"
+  tags:
+    - logging-setup-uninstall

@@ -1,0 +1,126 @@
+#  /etc/rsyslog.conf    Configuration file for rsyslog.
+#
+#                       For more information see
+#                       /usr/share/doc/rsyslog-doc/html/rsyslog_conf.html
+#
+#  Default logging rules can be found in /etc/rsyslog.d/50-default.conf
+
+
+#################
+#### MODULES ####
+#################
+
+#### Additional Config for rsyslog-ELK pipeline ####
+$MaxMessageSize 128k
+
+module(load="imfile" Mode="inotify")
+
+$template ForwardFormat,"%HOSTNAME% %syslogtag% %$.suffix:1:64% %msg%"
+
+ruleset(name="k8s") {
+        set $.env="-pcloud";
+        set $.suffix="container";
+        set $.suffix=$.suffix&$.env;
+        call forwardLogs
+}
+
+ruleset(name="forwardLogs") {
+    action(
+        type="omfwd"
+        queue.type="linkedlist"
+        queue.filename="forwardlogsbackup"
+        queue.size="10000000"
+        queue.discardMark="8000000"
+        queue.maxdiskspace="2g"
+        queue.spoolDirectory="/var/spool/queue"
+        action.resumeRetryCount="-1"
+        action.resumeInterval="10"
+        queue.saveOnShutdown="on"
+        action.reportSuspension="on"
+        action.reportSuspensionContinuation="on"
+        Target="{{ central_rsyslog_server_ip }}"
+        Port="{{ central_rsyslog_server_port }}"
+        template="ForwardFormat"
+        Protocol="tcp"
+        KeepAlive="on"
+          )
+}
+
+input(type="imfile"
+   File="{{ rsyslog_docker_logfiles }}"
+   Tag="container-log"
+   reopenOnTruncate="on"
+   PersistStateInterval="1000"
+   deleteStateOnFileDelete="on"
+   ruleset="k8s"
+)
+#### Additonal Config for rsyslog-ELK pipeline ####
+
+module(load="imuxsock") # provides support for local system logging
+#### Disabling Rate limit ###
+$IMUXSockRateLimitInterval 0
+$IMUXSockRateLimitBurst 0
+#### Disabling Rate limit ###
+
+#module(load="immark")  # provides --MARK-- message capability
+
+# provides UDP syslog reception
+#module(load="imudp")
+#input(type="imudp" port="514")
+
+# provides TCP syslog reception
+module(load="imtcp")
+input(type="imtcp" port="{{ central_rsyslog_server_port }}")
+
+# provides kernel logging support and enable non-kernel klog messages
+module(load="imklog" permitnonkernelfacility="on")
+
+###########################
+#### GLOBAL DIRECTIVES ####
+###########################
+
+#
+# Use traditional timestamp format.
+# To enable high precision timestamps, comment out the following line.
+#
+$ActionFileDefaultTemplate RSYSLOG_TraditionalFileFormat
+
+#### Additonal-Config for rsyslog-ELK pipeline ####
+$ActionQueueType LinkedList
+$ActionQueueFileName forwardlogsbackup
+$ActionQueueSize 1000000
+$ActionQueueDiscardMark 800000
+$ActionQueueMaxDiskSpace 1g
+$ActionQueueSaveOnShutdown on
+$ActionResumeRetryCount -1
+$ActionResumeInterval 10
+#### Additional Config for rsyslog-ELK pipeline ####
+
+# Filter duplicated messages
+$RepeatedMsgReduction on
+
+#
+# Set the default permissions for all log files.
+#
+$FileOwner syslog
+$FileGroup adm
+$FileCreateMode 0640
+$DirCreateMode 0755
+$Umask 0022
+#$PrivDropToUser syslog
+#$PrivDropToGroup syslog
+$PrivDropToUser root
+$PrivDropToGroup root
+
+#
+# Where to place spool and state files
+#
+$WorkDirectory /var/spool/rsyslog
+
+#
+# Include all config files in /etc/rsyslog.d/
+#
+$IncludeConfig /etc/rsyslog.d/*.conf
+
+# Forwarding logs to logstash endpoint
+*.* @@{{ masternode_ip }}:{{logstash_svc_nodeport }}

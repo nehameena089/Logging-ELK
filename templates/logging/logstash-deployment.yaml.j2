@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ logstash_deployment_name }}
+  namespace: {{ logging_namespace }}
+  labels:
+    app: {{ logstash_label }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ logstash_label }}
+  template:
+    metadata:
+      labels:
+        app: {{ logstash_label }}
+    spec:
+      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
+      containers:
+      - name: logstash
+        image: {{ logstash_image }}
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: logstash-tcp
+          protocol: TCP
+          containerPort: 516
+        - name: logstash-http
+          protocol: TCP
+          containerPort: 9600
+        env:
+        - name: LS_JAVA_OPTS
+          valueFrom:
+            configMapKeyRef:
+              name: {{ logstash_configmap_name }}
+              key: LS_JAVA_OPTS
+        resources:
+          requests:
+            cpu: {{ logstash_cpu_requests }}
+            memory: {{ logstash_memory_requests }}
+          limits:
+            cpu: {{ logstash_cpu_limits }}
+            memory: {{ logstash_memory_limits }}
+        readinessProbe:
+          tcpSocket:
+            port: 9600
+          initialDelaySeconds: 60
+          periodSeconds: 10
+        livenessProbe:
+          tcpSocket:
+            port: 9600
+          initialDelaySeconds: 65
+          periodSeconds: 10
+        volumeMounts:
+        - name: logstash-config
+          mountPath: /usr/share/logstash/pipeline/logstash.conf
+          subPath: logstash.conf
+        - name: logstash-config
+          mountPath: /usr/share/logstash/config/logstash.yml
+          subPath: logstash.yml
+        - name: logstash-config
+          mountPath: /usr/share/logstash/config/patterns
+          subPath: patterns
+      volumes:
+        - name: logstash-config
+          configMap:
+            name: {{ logstash_configmap_name }}
+            items:
+              - key: logstash.conf
+                path: logstash.conf
+              - key: logstash.yml
+                path: logstash.yml
+              - key: patterns
+                path: patterns

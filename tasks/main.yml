@@ -1,0 +1,20 @@
+---
+# tasks file for logging-elk
+
+- include: preinstall.yml
+  any_errors_fatal: true
+  when:
+    - inventory_hostname == groups['kube-master'][0]
+
+- include: elk-deployment.yml
+  when:
+     - inventory_hostname == groups['kube-master'][0]
+
+- include: filebeat-deployment.yml
+  when:
+    - inventory_hostname == groups['kube-master'][0]
+    - logcollector == "filebeat"
+
+- include: rsyslog-setup.yml
+  when:
+    - logcollector == "rsyslog"

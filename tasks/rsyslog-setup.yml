@@ -1,0 +1,85 @@
+---
+# tasks file for rsyslog-setup
+
+- name: Rsyslog setup | Add docker daemon changes for ELK
+  copy:
+    src: "daemon.json"
+    dest: "/etc/docker/daemon.json"
+  sudo: yes
+  when:
+    - operation == "install" or operation == "upgrade"
+  tags:
+    - rsyslog-setup-install
+
+
+- name: Rsyslog setup | Roll back docker daemon to original
+  copy:
+    src: "daemon-backup.json"
+    dest: "/etc/docker/daemon.json"
+  sudo: yes
+  when:
+    - operation == "uninstall"
+  tags:
+    - rsyslog-setup-uninstall
+
+
+- name: Rsyslog setup | Reload daemon
+  shell: systemctl daemon-reload
+  sudo: yes
+  tags:
+    - rsyslog-setup-install
+    - rsyslog-setup-uninstall
+
+
+- name: Rsyslog setup | Restart docker service
+  service:
+    name: docker
+    state: restarted
+  sudo: yes
+  tags:
+    - rsyslog-setup-install
+    - rsyslog-setup-uninstall
+
+
+- name: Rsyslog setup | Add rsyslog conf changes for ELK
+  template:
+    src: "rsyslog/rsyslog.conf.j2"
+    dest: "/etc/rsyslog.conf"
+  sudo: yes
+  when:
+    - operation == "install" or operation == "upgrade"
+  tags:
+    - rsyslog-setup-install
+
+
+- name: Rsyslog setup | Add central rsyslog conf changes for ELK
+  template:
+    src: "rsyslog/central-rsyslog.conf.j2"
+    dest: "/etc/rsyslog.conf"
+  sudo: yes
+  when:
+    - inventory_hostname == groups['kube-node'][0]
+    - operation == "install" or operation == "upgrade"
+  tags:
+    - rsyslog-setup-install
+
+
+- name: Rsyslog setup | Roll back rsyslog conf file to original
+  template:
+    src: "rsyslog/rsyslog-backup.conf.j2"
+    dest: "/etc/rsyslog.conf"
+  sudo: yes
+  when:
+    - operation == "uninstall"
+  tags:
+    - rsyslog-setup-uninstall
+
+
+- name: Rsyslog setup | Restart rsyslog service
+  service:
+    name: rsyslog
+    state: restarted
+  sudo: yes
+  tags:
+    - rsyslog-setup-install
+    - rsyslog-setup-uninstall

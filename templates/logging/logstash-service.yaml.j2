@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ logstash_svc_name }}
+  namespace: {{ logging_namespace }}
+  labels:
+    app: {{ logstash_label }}
+spec:
+  selector:
+    app: {{ logstash_label }}
+  type: NodePort
+  ports:
+  - port: 516
+    protocol: TCP
+    targetPort: 516
+    nodePort: {{ logstash_svc_nodeport }}

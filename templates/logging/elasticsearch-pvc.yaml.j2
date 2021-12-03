@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ elasticsearch_pvc_name }}
+  namespace: {{ logging_namespace }}
+spec:
+  accessModes:
+  - ReadWriteOnce
+  storageClassName: {{ logging_storageclass_name }}
+  resources:
+    requests:
+      storage: {{ elasticsearch_pvc_size }}
